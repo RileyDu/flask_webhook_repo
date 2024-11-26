@@ -11,39 +11,50 @@ app = Flask(__name__)
 
 @app.route('/post-alert', methods=['POST'])
 def post_alert():
-    data = request.json
-    try:
-        # Fetch credentials from environment variables
-        db_name = os.getenv("DB_NAME")
-        db_user = os.getenv("DB_USER")
-        db_password = os.getenv("DB_PASSWORD")
-        db_host = os.getenv("DB_HOST")
+    data = request.json  # Get JSON payload
 
-        # Connect to the database
+    try:
+        # Extract the "hits" array from the JSON structure
+        hits = data.get("hits", {}).get("hits", [])
+        
+        if not hits:
+            return {"message": "No alerts found in payload"}, 400
+
         conn = psycopg2.connect(
-            dbname=db_name,
-            user=db_user,
-            password=db_password,
-            host=db_host
+            dbname=os.getenv("DB_NAME"),
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASSWORD"),
+            host=os.getenv("DB_HOST")
         )
         cursor = conn.cursor()
 
-        for alert in data:
-            rule_name = alert["_source"]["rule"]["name"]
-            timestamp = alert["_source"]["@timestamp"]
-            host_ip = alert["_source"]["event_data"]["metadata"]["input"]["beats"]["host"]["ip"]
+        # Iterate through each hit and insert data into the database
+        for hit in hits:
+            source = hit.get("_source", {})
+            timestamp = source.get("@timestamp")
+            rule_name = source.get("rule", {}).get("name")
+            source_ip = source.get("event_data", {}).get("metadata", {}).get("input", {}).get("beats", {}).get("host", {}).get("ip")
+            severity = source.get("sigma_level", "unknown")
+
             cursor.execute(
-                "INSERT INTO soalerts (timestamp, alert_name, host_ip) VALUES (%s, %s, %s)",
-                (timestamp, rule_name, host_ip)
+                """
+                INSERT INTO soalerts (timestamp, alert_name, source_ip, severity)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (timestamp, rule_name, source_ip, severity)
             )
+
         conn.commit()
-        return "Alerts processed successfully", 200
+        return {"message": "Alerts processed successfully"}, 200
+
     except Exception as e:
-        return f"Error: {e}", 500
+        return {"error": str(e)}, 500
+
     finally:
         if conn:
             cursor.close()
             conn.close()
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
