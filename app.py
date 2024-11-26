@@ -1,6 +1,12 @@
-
+import os
 from flask import Flask, request
 import psycopg2
+
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 
 app = Flask(__name__)
 
@@ -8,8 +14,21 @@ app = Flask(__name__)
 def post_alert():
     data = request.json
     try:
-        conn = psycopg2.connect("dbname=<db> user=<user> password=<password> host=<host>")
+        # Fetch credentials from environment variables
+        db_name = os.getenv("DB_NAME")
+        db_user = os.getenv("DB_USER")
+        db_password = os.getenv("DB_PASSWORD")
+        db_host = os.getenv("DB_HOST")
+
+        # Connect to the database
+        conn = psycopg2.connect(
+            dbname=db_name,
+            user=db_user,
+            password=db_password,
+            host=db_host
+        )
         cursor = conn.cursor()
+
         for alert in data:
             rule_name = alert["_source"]["rule"]["name"]
             timestamp = alert["_source"]["@timestamp"]
