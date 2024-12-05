@@ -6,20 +6,23 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-
 app = Flask(__name__)
 
 @app.route('/post-alert', methods=['POST'])
 def post_alert():
     data = request.json  # Get JSON payload
 
+    conn = None  # Initialize the variable to avoid UnboundLocalError
+    cursor = None
+
     try:
         # Extract the "hits" array from the JSON structure
-        hits = data.get("hits", {}).get("hits", [])
+        hits = data.get("hits", [])
         
         if not hits:
             return {"message": "No alerts found in payload"}, 400
 
+        # Connect to the database
         conn = psycopg2.connect(
             dbname=os.getenv("DB_NAME"),
             user=os.getenv("DB_USER"),
@@ -30,11 +33,11 @@ def post_alert():
 
         # Iterate through each hit and insert data into the database
         for hit in hits:
-            source = hit.get("_source", {})
-            timestamp = source.get("@timestamp")
-            rule_name = source.get("rule", {}).get("name")
-            source_ip = source.get("event_data", {}).get("metadata", {}).get("input", {}).get("beats", {}).get("host", {}).get("ip")
-            severity = source.get("sigma_level", "unknown")
+            source = hit
+            timestamp = source.get("timestamp")
+            rule_name = source.get("rule_name")
+            source_ip = source.get("source_ip")
+            severity = source.get("severity", "unknown")
 
             cursor.execute(
                 """
@@ -51,8 +54,10 @@ def post_alert():
         return {"error": str(e)}, 500
 
     finally:
-        if conn:
+        # Ensure the cursor and connection are closed if they were successfully created
+        if cursor:
             cursor.close()
+        if conn:
             conn.close()
 
 
