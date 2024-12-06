@@ -2,24 +2,33 @@ import os
 from flask import Flask, request
 import psycopg2
 from dotenv import load_dotenv
+import logging
 
 # Load environment variables from .env file
 load_dotenv()
 
 app = Flask(__name__)
 
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+
 @app.route('/post-alert', methods=['POST'])
 def post_alert():
-    data = request.json  # Get JSON payload
-
-    conn = None  # Initialize the variable to avoid UnboundLocalError
-    cursor = None
-
     try:
-        # Extract the "hits" array from the JSON structure
-        hits = data.get("hits", [])
-        
+        data = request.get_json()
+        app.logger.debug(f"Received data: {data}")
+
+        if not data:
+            app.logger.debug("No JSON payload received.")
+            return {"message": "No JSON payload received"}, 400
+
+        # Attempt to extract 'hits' from the expected location
+        hits = data.get("result", {}).get("input", {}).get("payload", {}).get("hits", [])
+
+        app.logger.debug(f"Number of hits received: {len(hits)}")
+
         if not hits:
+            app.logger.debug("No hits found in payload.")
             return {"message": "No alerts found in payload"}, 400
 
         # Connect to the database
@@ -30,14 +39,18 @@ def post_alert():
             host=os.getenv("DB_HOST")
         )
         cursor = conn.cursor()
+        app.logger.debug("Database connection established.")
 
         # Iterate through each hit and insert data into the database
         for hit in hits:
-            source = hit
-            timestamp = source.get("timestamp")
-            rule_name = source.get("rule_name")
-            source_ip = source.get("source_ip")
-            severity = source.get("severity", "unknown")
+            timestamp = hit.get("timestamp")
+            rule_name = hit.get("rule_name")
+            source_ip = hit.get("source_ip")
+            severity = hit.get("severity", "unknown")
+
+            if not all([timestamp, rule_name, source_ip]):
+                app.logger.warning(f"Missing fields in hit: {hit}")
+                continue  # Skip this hit or handle as needed
 
             cursor.execute(
                 """
@@ -46,20 +59,24 @@ def post_alert():
                 """,
                 (timestamp, rule_name, source_ip, severity)
             )
+            app.logger.debug(f"Inserted hit into database: {hit}")
 
         conn.commit()
+        app.logger.debug("Database commit successful.")
         return {"message": "Alerts processed successfully"}, 200
 
     except Exception as e:
+        app.logger.error(f"Error processing alert: {e}")
         return {"error": str(e)}, 500
 
     finally:
         # Ensure the cursor and connection are closed if they were successfully created
-        if cursor:
+        if 'cursor' in locals():
             cursor.close()
-        if conn:
+            app.logger.debug("Database cursor closed.")
+        if 'conn' in locals():
             conn.close()
-
+            app.logger.debug("Database connection closed.")
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5000, debug=True)
