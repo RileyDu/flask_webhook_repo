@@ -1,5 +1,5 @@
 import os
-from flask import Flask, request
+from flask import Flask, request, abort
 import psycopg2
 from dotenv import load_dotenv
 import logging
@@ -22,9 +22,23 @@ def post_alert():
             app.logger.debug("No JSON payload received.")
             return {"message": "No JSON payload received"}, 400
 
-        # Navigate through the nested structure to extract the hits list
-        hits_wrapper = data.get("result", {}).get("input", {}).get("payload", {}).get("hits", {})
-        hits = hits_wrapper.get("hits", [])
+        # Initialize hits list
+        hits = []
+
+        # Attempt to extract hits from nested structure
+        if "result" in data:
+            hits_wrapper = data.get("result", {}).get("input", {}).get("payload", {}).get("hits", {}).get("hits", [])
+            app.logger.debug("Looking for hits in nested structure.")
+            hits.extend(hits_wrapper)
+
+        # If no hits found in nested structure, look for top-level hits
+        if not hits:
+            hits_wrapper = data.get("hits", [])
+            if isinstance(hits_wrapper, list):
+                app.logger.debug("Looking for hits at top level.")
+                hits.extend(hits_wrapper)
+            else:
+                app.logger.debug("Top-level 'hits' is not a list.")
 
         app.logger.debug(f"Number of hits received: {len(hits)}")
 
@@ -44,11 +58,20 @@ def post_alert():
 
         # Iterate through each hit and extract necessary fields
         for hit in hits:
-            source = hit.get("_source", {})
-            timestamp = source.get("@timestamp")
-            rule_name = source.get("rule", {}).get("name")
-            source_ip = source.get("event_data", {}).get("metadata", {}).get("input", {}).get("beats", {}).get("host", {}).get("ip")
-            severity = source.get("sigma_level", "unknown")
+            # Check if hit is a top-level hit or a nested hit
+            if 'timestamp' in hit:
+                # Top-level hit
+                timestamp = hit.get("timestamp")
+                rule_name = hit.get("rule_name")
+                source_ip = hit.get("source_ip")
+                severity = hit.get("severity", "unknown")
+            else:
+                # Nested hit
+                source = hit.get("_source", {})
+                timestamp = source.get("@timestamp")
+                rule_name = source.get("rule", {}).get("name")
+                source_ip = source.get("event_data", {}).get("metadata", {}).get("input", {}).get("beats", {}).get("host", {}).get("ip")
+                severity = source.get("sigma_level", "unknown")
 
             # Validate that all required fields are present
             if not all([timestamp, rule_name, source_ip]):
