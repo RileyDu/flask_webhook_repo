@@ -106,5 +106,75 @@ def post_alert():
             conn.close()
             app.logger.debug("Database connection closed.")
 
+
+@app.route('/post-trial', methods=['POST'])
+def post_trial():
+    try:
+        data = request.get_json()
+        app.logger.debug(f"Received data for trialESP32: {data}")
+
+        if not data:
+            app.logger.debug("No JSON payload received.")
+            return {"message": "No JSON payload received"}, 400
+
+        # If a single record is received, wrap it in a list for uniform processing.
+        if isinstance(data, dict):
+            records = [data]
+        elif isinstance(data, list):
+            records = data
+        else:
+            app.logger.error("Invalid JSON format, expecting an object or list of objects.")
+            return {"message": "Invalid JSON format, expecting object or array of objects"}, 400
+
+        # Connect to the database
+        conn = psycopg2.connect(
+            dbname=os.getenv("DB_NAME"),
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASSWORD"),
+            host=os.getenv("DB_HOST")
+        )
+        cursor = conn.cursor()
+        app.logger.debug("Database connection established for trialESP32.")
+
+        # Process each record
+        for record in records:
+            # Extract fields for trialESP32 table
+            button_toggle = record.get("button_toggle")
+            event_time = record.get("event_time")
+            light = record.get("light")
+
+            # Validate that all required fields are present
+            if button_toggle is None or event_time is None or light is None:
+                app.logger.warning(f"Missing required fields in record: {record}")
+                continue  # Skip this record
+
+            # Insert data into the trialESP32 table
+            cursor.execute(
+                """
+                INSERT INTO trialESP32 (button_toggle, event_time, light)
+                VALUES (%s, %s, %s)
+                """,
+                (button_toggle, event_time, light)
+            )
+            app.logger.debug(f"Inserted record into trialESP32: {record}")
+
+        # Commit the transaction
+        conn.commit()
+        app.logger.debug("Database commit successful for trialESP32.")
+        return {"message": "Records processed successfully"}, 200
+
+    except Exception as e:
+        app.logger.error(f"Error processing trialESP32 data: {e}")
+        return {"error": str(e)}, 500
+
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+            app.logger.debug("Database cursor closed for trialESP32.")
+        if 'conn' in locals():
+            conn.close()
+            app.logger.debug("Database connection closed for trialESP32.")
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
