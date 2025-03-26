@@ -174,6 +174,69 @@ def post_trial():
         if 'conn' in locals():
             conn.close()
             app.logger.debug("Database connection closed for trialESP32.")
+            
+            
+            
+@app.route('/csstrial', methods=['POST'])
+def post_bme280():
+    try:
+        data = request.get_json()
+        app.logger.debug(f"Received CSS payload: {data}")
+
+        if not data or "payload" not in data:
+            app.logger.debug("No payload found in request.")
+            return {"message": "No valid payload received"}, 400
+
+        payload_str = data["payload"]
+
+        # Look for 'BME280' and extract the 4 numbers after it
+        try:
+            parts = payload_str.split()
+            bme_index = parts.index("BME280")
+            temperature = float(parts[bme_index + 1])
+            pressure = float(parts[bme_index + 2])
+            altitude = float(parts[bme_index + 3])
+            humidity = float(parts[bme_index + 4])
+        except (ValueError, IndexError) as e:
+            app.logger.error(f"Failed to parse BME280 values: {e}")
+            return {"error": "Malformed payload or missing BME280 data"}, 400
+
+        # Connect to the database
+        conn = psycopg2.connect(
+            dbname=os.getenv("DB_NAME"),
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASSWORD"),
+            host=os.getenv("DB_HOST")
+        )
+        cursor = conn.cursor()
+        app.logger.debug("Database connection established for BME280.")
+
+        # Insert into css_trial
+        cursor.execute(
+            """
+            INSERT INTO css_trial (
+                temperature_celsius, pressure_hpa, altitude_meters, humidity_percent
+            )
+            VALUES (%s, %s, %s, %s)
+            """,
+            (temperature, pressure, altitude, humidity)
+        )
+        conn.commit()
+        app.logger.debug("Sensor data inserted successfully.")
+
+        return {"message": "Sensor reading stored"}, 200
+
+    except Exception as e:
+        app.logger.error(f"Error processing BME280 data: {e}")
+        return {"error": str(e)}, 500
+
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+            app.logger.debug("Database cursor closed for BME280.")
+        if 'conn' in locals():
+            conn.close()
+            app.logger.debug("Database connection closed for BME280.")
 
 
 if __name__ == '__main__':
